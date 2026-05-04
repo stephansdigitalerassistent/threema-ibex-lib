@@ -299,7 +299,7 @@ export class IbexProcessor {
         IbexSession.getSupportedVersionRange(),
         session.myEphemeralPublicKey
       );
-    } catch (error) {
+    } catch {
       // Typically happens if version negotiation fails
       return createTerminate(init.sessionId, TerminateCause.DISABLED_BY_LOCAL);
     }
@@ -397,7 +397,7 @@ export class IbexProcessor {
       if (numSkipped > 0) {
         this.events.onMessagesSkipped?.(message.sessionId, contact, numSkipped);
       }
-    } catch (error) {
+    } catch {
       // Likely counter moved backwards or increment too large
       return createReject(
         message.sessionId,
@@ -414,7 +414,7 @@ export class IbexProcessor {
     let plaintext: Uint8Array;
     try {
       plaintext = await this.crypto.symmetricDecrypt(message.encryptedData, encryptionKey, nonce);
-    } catch (error) {
+    } catch {
       // Decryption failed - could be wrong key or corrupted data
       return createReject(
         message.sessionId,
