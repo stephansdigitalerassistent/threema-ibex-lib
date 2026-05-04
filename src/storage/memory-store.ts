@@ -10,7 +10,7 @@ import { getSessionState } from '../types/storage.js';
  * Data is lost when the process exits.
  */
 export class MemoryIbexSessionStore implements IbexSessionStore {
-  private sessions: Map<string, SerializedIbexSession> = new Map();
+  private sessions = new Map<string, SerializedIbexSession>();
 
   private makeKey(myIdentity: string, peerIdentity: string, sessionId: IbexSessionId): string {
     return `${myIdentity}:${peerIdentity}:${sessionId.toHex()}`;
