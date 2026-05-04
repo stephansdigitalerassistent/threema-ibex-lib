@@ -13,10 +13,14 @@ export class RatchetError extends Error {
 }
 
 /**
- * KDF Ratchet for forward secrecy
+ * KDF Ratchet for forward secrecy.
  *
- * Each turn derives a new chain key from the previous one, ensuring
- * that past keys cannot be recovered from the current state.
+ * This class implements a chain of keys where each key is derived from the
+ * previous one using a Key Derivation Function (KDF), specifically BLAKE2b-256.
+ *
+ * It ensures forward secrecy: if a message key or even a chain key is
+ * compromised, past message keys cannot be recovered because the derivation
+ * process is one-way.
  */
 export class KDFRatchet {
   private _counter: number;
@@ -24,10 +28,12 @@ export class KDFRatchet {
   private _config: ResolvedIbexConfig;
 
   /**
-   * Create a new KDF ratchet
-   * @param counter - Initial counter value (typically 0)
+   * Create a new KDF ratchet.
+   *
+   * @param counter - Initial counter value (0-based)
    * @param initialChainKey - 32-byte initial chain key (K0)
    * @param config - Optional configuration overrides
+   * @throws RatchetError if the initial chain key is not 32 bytes or counter is negative
    */
   constructor(
     counter: number,
@@ -47,22 +53,29 @@ export class KDFRatchet {
   }
 
   /**
-   * Current ratchet counter (0-based, increments after each turn)
+   * Current ratchet counter.
+   * Increments each time the ratchet is turned. Represents the number of
+   * messages processed by this ratchet.
    */
   get counter(): number {
     return this._counter;
   }
 
   /**
-   * Current chain key (for persistence)
+   * Current chain key (32 bytes).
+   * This is used to derive the next chain key and the current message key.
+   * Should be handled with care and zeroed out when no longer needed.
    */
   get currentChainKey(): Uint8Array {
     return new Uint8Array(this._currentChainKey);
   }
 
   /**
-   * Derive the encryption key from the current chain key
-   * @param crypto - Crypto provider to use
+   * Derive the encryption key (message key) from the current chain key.
+   *
+   * This uses BLAKE2b-256 with a specific "encryption key" salt.
+   *
+   * @param crypto - Crypto provider for BLAKE2b
    * @returns 32-byte encryption key
    */
   async getCurrentEncryptionKey(crypto: CryptoProvider): Promise<Uint8Array> {
@@ -75,10 +88,15 @@ export class KDFRatchet {
   }
 
   /**
-   * Turn the ratchet once, deriving a new chain key
-   * @param crypto - Crypto provider to use
+   * Turn the ratchet once, advancing to the next chain key.
+   *
+   * The old chain key is securely zeroed out after the new one is derived
+   * to maintain forward secrecy.
+   *
+   * @param crypto - Crypto provider for BLAKE2b
    */
   async turn(crypto: CryptoProvider): Promise<void> {
+    // Derive the new chain key using the "chain key" salt
     const newChainKey = await crypto.blake2b256(
       this._currentChainKey,
       this._config.kdfPersonal,
@@ -86,18 +104,22 @@ export class KDFRatchet {
       new Uint8Array(0)
     );
 
-    // Zero out old key for forward secrecy
+    // Zero out old key for forward secrecy - ensure it's wiped from memory
     this._currentChainKey.fill(0);
     this._currentChainKey = newChainKey;
     this._counter++;
   }
 
   /**
-   * Turn the ratchet until it reaches the target counter
-   * @param crypto - Crypto provider to use
-   * @param targetCounter - Target counter value
-   * @returns Number of turns performed
-   * @throws RatchetError if target is behind current counter or too far ahead
+   * Turn the ratchet multiple times until it reaches the target counter.
+   *
+   * Useful for catching up when messages are received out of order or
+   * some messages were lost.
+   *
+   * @param crypto - Crypto provider for BLAKE2b
+   * @param targetCounter - The desired counter value to reach
+   * @returns The number of turns performed
+   * @throws RatchetError if the target is behind the current counter or the increment exceeds config limits
    */
   async turnUntil(crypto: CryptoProvider, targetCounter: number): Promise<number> {
     if (targetCounter < this._counter) {
@@ -107,12 +129,14 @@ export class KDFRatchet {
     }
 
     const numTurns = targetCounter - this._counter;
+    // Safety check to prevent infinite loops or DoS if a malicious counter is provided
     if (numTurns > this._config.maxCounterIncrement) {
       throw new RatchetError(
         `Counter increment too large: ${numTurns} > ${this._config.maxCounterIncrement}`
       );
     }
 
+    // Repeatedly turn the ratchet until the counters match
     for (let i = 0; i < numTurns; i++) {
       await this.turn(crypto);
     }

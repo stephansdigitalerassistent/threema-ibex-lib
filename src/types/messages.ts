@@ -2,108 +2,116 @@ import type { IbexSessionId } from '../core/session-id.js';
 import type { DHType, Version, VersionRange } from './common.js';
 
 /**
- * Ibex control message types
+ * Ibex control message types.
  */
 export enum IbexMessageType {
+  /** Initiate a new session */
   INIT = 'init',
+  /** Accept a session initiation */
   ACCEPT = 'accept',
+  /** Reject an encrypted message */
   REJECT = 'reject',
+  /** Terminate an active session */
   TERMINATE = 'terminate',
+  /** An encapsulated encrypted message */
   MESSAGE = 'message',
 }
 
 /**
- * Reason for rejecting a message
+ * Reason for rejecting an incoming Ibex message.
  */
 export enum RejectCause {
-  /** Session ID is unknown */
+  /** The session ID specified in the message header is unknown to the receiver */
   UNKNOWN_SESSION = 1,
-  /** State mismatch (e.g., 4DH message in 2DH-only session) */
+  /** The session is in a state that does not allow the requested operation (e.g., 4DH message before handshake complete) */
   STATE_MISMATCH = 2,
 }
 
 /**
- * Reason for terminating a session
+ * Reason for terminating an Ibex session.
  */
 export enum TerminateCause {
-  /** Session is being reset by user */
+  /** The session is being manually reset by the local user */
   RESET = 1,
-  /** Session ID is unknown */
+  /** The receiver of a message does not recognize the session ID */
   UNKNOWN_SESSION = 2,
-  /** Forward security disabled by local party */
+  /** The local party has disabled Ibex forward secrecy for this contact */
   DISABLED_BY_LOCAL = 3,
-  /** Forward security disabled by remote party */
+  /** The remote party has disabled Ibex forward secrecy */
   DISABLED_BY_REMOTE = 4,
 }
 
 /**
- * Base interface for all Ibex messages
+ * Base interface for all Ibex protocol messages.
  */
 export interface IbexMessageBase {
+  /** The specific type of this Ibex message */
   type: IbexMessageType;
+  /** The unique session identifier */
   sessionId: IbexSessionId;
 }
 
 /**
- * Init message - sent to initiate a new session
+ * Init message: Sent by the initiator to propose a new forward-secure session.
  */
 export interface IbexInit extends IbexMessageBase {
   type: IbexMessageType.INIT;
-  /** Supported version range */
+  /** The range of protocol versions the initiator supports */
   versionRange: VersionRange;
-  /** Ephemeral public key (32 bytes) */
+  /** The initiator's ephemeral X25519 public key (32 bytes) */
   ephemeralPublicKey: Uint8Array;
 }
 
 /**
- * Accept message - response to Init
+ * Accept message: Sent by the responder to accept a session initiation.
+ * Completes the first half of the 4DH handshake.
  */
 export interface IbexAccept extends IbexMessageBase {
   type: IbexMessageType.ACCEPT;
-  /** Supported version range */
+  /** The range of protocol versions the responder supports */
   versionRange: VersionRange;
-  /** Ephemeral public key (32 bytes) */
+  /** The responder's ephemeral X25519 public key (32 bytes) */
   ephemeralPublicKey: Uint8Array;
 }
 
 /**
- * Reject message - reject an encapsulated message
+ * Reject message: Sent when an encapsulated message cannot be decrypted or processed.
  */
 export interface IbexReject extends IbexMessageBase {
   type: IbexMessageType.REJECT;
-  /** ID of the rejected message */
+  /** The identifier of the message that was rejected */
   rejectedMessageId: Uint8Array;
-  /** Reason for rejection */
+  /** The reason why the message was rejected */
   cause: RejectCause;
-  /** Optional group identity if rejecting a group message */
+  /** Optional group identity if the rejected message was a group message */
   groupIdentity?: GroupIdentity;
 }
 
 /**
- * Terminate message - end a session
+ * Terminate message: Sent to signal that a session is being closed.
  */
 export interface IbexTerminate extends IbexMessageBase {
   type: IbexMessageType.TERMINATE;
-  /** Reason for termination */
+  /** The reason why the session is being terminated */
   cause: TerminateCause;
 }
 
 /**
- * Encapsulated message - contains encrypted inner message
+ * IbexMessage: Encapsulates an encrypted payload with forward security.
  */
 export interface IbexMessage extends IbexMessageBase {
   type: IbexMessageType.MESSAGE;
-  /** DH type (2DH or 4DH) */
+  /** Whether 2DH or 4DH was used for encryption */
   dhType: DHType;
-  /** Ratchet counter */
+  /** The ratchet counter (increments for every message) */
   counter: number;
-  /** Offered version (max supported) */
+  /** The maximum protocol version the sender supports */
   offeredVersion: Version;
-  /** Applied version (actually used) */
+  /** The protocol version actually applied to this message */
   appliedVersion: Version;
-  /** Optional group identity */
+  /** Optional group identity if this is a group message */
   groupIdentity?: GroupIdentity;
-  /** Encrypted message payload */
+  /** The AEAD-encrypted message payload */
   encryptedData: Uint8Array;
 }
 

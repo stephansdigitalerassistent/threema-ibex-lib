@@ -17,36 +17,49 @@ export class IbexSessionError extends Error {
 }
 
 /**
- * Negotiated 4DH versions for local and remote
+ * Negotiated 4DH versions for local and remote parties.
+ * Used to track which protocol version is being applied for outgoing and incoming messages.
  */
 export interface IbexVersions {
-  /** Version for local/outgoing 4DH messages */
+  /** Protocol version used for local (outgoing) 4DH messages */
   local: Version;
-  /** Version for remote/incoming 4DH messages */
+  /** Protocol version used for remote (incoming) 4DH messages */
   remote: Version;
 }
 
 /**
- * Contact information needed for key exchange
+ * Contact information required for establishing or maintaining an Ibex session.
  */
 export interface Contact {
+  /** Unique identifier for the contact (e.g., Threema ID) */
   identity: string;
+  /** The contact's long-term X25519 public key */
   publicKey: Uint8Array;
 }
 
 /**
- * Identity store for accessing local keys
+ * Identity store providing access to the local party's long-term identity keys.
  */
 export interface IdentityStore {
+  /** Unique identifier for the local party */
   identity: string;
+  /** The local party's long-term X25519 public key */
   publicKey: Uint8Array;
+  /** The local party's long-term X25519 private key. MUST be kept secure. */
   privateKey: Uint8Array;
 }
 
 /**
- * Ibex session for forward secrecy
+ * Ibex session for forward secrecy.
  *
  * Manages ECDH key exchange and KDF ratchets between two parties.
+ * Provides double-ratchet-like forward secrecy using X25519 for Diffie-Hellman
+ * and BLAKE2b for key derivation.
+ *
+ * A session progresses through several states:
+ * 1. Initiator starts with 2DH (L20).
+ * 2. Responder receives Init and responds with Accept (moves to RL44).
+ * 3. Initiator receives Accept (moves to RL44).
  */
 export class IbexSession {
   private readonly _id: IbexSessionId;
@@ -62,7 +75,7 @@ export class IbexSession {
   private _peerRatchet4DH: KDFRatchet | null;
   private readonly _config: ResolvedIbexConfig;
 
-  /** Supported version range */
+  /** Supported protocol version range: 1.0 to 1.2 */
   static readonly SUPPORTED_VERSION_MIN: Version = V.V1_0;
   static readonly SUPPORTED_VERSION_MAX: Version = V.V1_2;
 
@@ -95,54 +108,93 @@ export class IbexSession {
   }
 
   // Getters
+  /**
+   * Unique session identifier.
+   */
   get id(): IbexSessionId {
     return this._id;
   }
 
+  /**
+   * Local identity identifier.
+   */
   get myIdentity(): string {
     return this._myIdentity;
   }
 
+  /**
+   * Remote party's identity identifier.
+   */
   get peerIdentity(): string {
     return this._peerIdentity;
   }
 
+  /**
+   * Local ephemeral public key used for this session.
+   */
   get myEphemeralPublicKey(): Uint8Array {
     return new Uint8Array(this._myEphemeralPublicKey);
   }
 
+  /**
+   * Local ephemeral private key. Only available during session setup for the initiator.
+   */
   get myEphemeralPrivateKey(): Uint8Array | null {
     return this._myEphemeralPrivateKey ? new Uint8Array(this._myEphemeralPrivateKey) : null;
   }
 
+  /**
+   * Currently negotiated 4DH versions, if established.
+   */
   get current4DHVersions(): IbexVersions | null {
     return this._current4DHVersions;
   }
 
+  /**
+   * Timestamp of the last outgoing message sent in this session.
+   */
   get lastOutgoingMessageTimestamp(): number {
     return this._lastOutgoingMessageTimestamp;
   }
 
+  /**
+   * Set the timestamp of the last outgoing message.
+   */
   set lastOutgoingMessageTimestamp(value: number) {
     this._lastOutgoingMessageTimestamp = value;
   }
 
+  /**
+   * Outgoing 2DH ratchet (used before 4DH is established).
+   */
   get myRatchet2DH(): KDFRatchet | null {
     return this._myRatchet2DH;
   }
 
+  /**
+   * Outgoing 4DH ratchet.
+   */
   get myRatchet4DH(): KDFRatchet | null {
     return this._myRatchet4DH;
   }
 
+  /**
+   * Incoming 2DH ratchet (used before 4DH is established).
+   */
   get peerRatchet2DH(): KDFRatchet | null {
     return this._peerRatchet2DH;
   }
 
+  /**
+   * Incoming 4DH ratchet.
+   */
   get peerRatchet4DH(): KDFRatchet | null {
     return this._peerRatchet4DH;
   }
 
+  /**
+   * Session configuration.
+   */
   get config(): ResolvedIbexConfig {
     return this._config;
   }
@@ -426,10 +478,15 @@ export class IbexSession {
   }
 
   /**
-   * Negotiate the version to use
+   * Negotiate the protocol version to use between local and remote supported ranges.
+   *
+   * @param local - Local party's supported version range
+   * @param remote - Remote party's supported version range
+   * @returns The highest common version supported by both parties
+   * @throws IbexSessionError if no common version exists or the range is invalid
    */
   private static negotiateVersion(local: VersionRange, remote: VersionRange): Version {
-    // Handle legacy clients with no version range
+    // Handle legacy clients with no version range (default to 1.0)
     if (remote.min === 0 && remote.max === 0) {
       remote = { min: V.V1_0, max: V.V1_0 };
     }
@@ -438,19 +495,29 @@ export class IbexSession {
       throw new IbexSessionError(`Invalid version range: min=${remote.min}, max=${remote.max}`);
     }
 
-    // Check for overlap
+    // Check for overlap between local and remote supported ranges
     if (remote.min > local.max || local.min > remote.max) {
       throw new IbexSessionError(
         `No common version: local=[${local.min},${local.max}], remote=[${remote.min},${remote.max}]`
       );
     }
 
-    // Take minimum of maximum supported versions
+    // Take minimum of maximum supported versions (highest common version)
     return Math.min(local.max, remote.max);
   }
 
   /**
-   * Initialize 2DH KDF ratchet
+   * Initialize a 2DH KDF ratchet.
+   *
+   * This is used for the initial forward security state before the full 4DH
+   * handshake is completed.
+   *
+   * @param crypto - Crypto provider for BLAKE2b and X25519
+   * @param dhStaticStatic - DH(localStatic, remoteStatic)
+   * @param dhEphemeralStatic - DH(localEphemeral, remoteStatic)
+   * @param identity - Identity string for salt derivation
+   * @param config - Resolved configuration
+   * @returns A new KDFRatchet initialized with derived K0
    */
   private static async initKDF2DH(
     crypto: CryptoProvider,
@@ -459,16 +526,31 @@ export class IbexSession {
     identity: string,
     config: ResolvedIbexConfig
   ): Promise<KDFRatchet> {
+    // Combine DH outputs: Static-Static and Ephemeral-Static
     const combined = concat(dhStaticStatic, dhEphemeralStatic);
     const salt = config.keSalt2DHPrefix + identity;
 
+    // Derive K0 using BLAKE2b-256
     const k0 = await crypto.blake2b256(combined, config.kdfPersonal, salt, new Uint8Array(0));
 
     return new KDFRatchet(0, k0, config);
   }
 
   /**
-   * Initialize 4DH KDF ratchets
+   * Initialize 4DH KDF ratchets for both directions.
+   *
+   * The 4DH handshake combines four Diffie-Hellman outputs to ensure that the
+   * resulting keys depend on both parties' static and ephemeral keys.
+   *
+   * @param crypto - Crypto provider
+   * @param dhStaticStatic - DH(localStatic, remoteStatic)
+   * @param dhEphemeralStatic - DH(localEphemeral, remoteStatic)
+   * @param dhStaticEphemeral - DH(localStatic, remoteEphemeral)
+   * @param dhEphemeralEphemeral - DH(localEphemeral, remoteEphemeral)
+   * @param myIdentity - Local identity identifier for salt derivation
+   * @param peerIdentity - Remote identity identifier for salt derivation
+   * @param config - Resolved configuration
+   * @returns Initialized outgoing and incoming 4DH ratchets
    */
   private static async initKDF4DH(
     crypto: CryptoProvider,
@@ -480,16 +562,17 @@ export class IbexSession {
     peerIdentity: string,
     config: ResolvedIbexConfig
   ): Promise<{ myRatchet4DH: KDFRatchet; peerRatchet4DH: KDFRatchet }> {
-    // Hash all 4 DH outputs together
+    // Hash all 4 DH outputs together to create an intermediate master secret
     const combined = concat(
       dhStaticStatic,
       dhEphemeralStatic,
       dhStaticEphemeral,
       dhEphemeralEphemeral
     );
+    // Use BLAKE2b-512 for the intermediate hash to preserve entropy
     const intermediateHash = await crypto.blake2b512(null, '', '', combined);
 
-    // Derive per-identity keys
+    // Derive per-identity keys (K0) for each direction
     const mySalt = config.keSalt4DHPrefix + myIdentity;
     const peerSalt = config.keSalt4DHPrefix + peerIdentity;
 
