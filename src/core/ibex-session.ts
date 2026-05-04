@@ -191,12 +191,12 @@ export class IbexSession {
 
     // Derive 2DH root key
     const dhStaticStatic = await crypto.x25519(identityStore.privateKey, contact.publicKey);
-    const dhStaticEphemeral = await crypto.x25519(ephemeralKeyPair.privateKey, contact.publicKey);
+    const dhEphemeralStatic = await crypto.x25519(ephemeralKeyPair.privateKey, contact.publicKey);
 
     const myRatchet2DH = await IbexSession.initKDF2DH(
       crypto,
       dhStaticStatic,
-      dhStaticEphemeral,
+      dhEphemeralStatic,
       identityStore.identity,
       resolvedConfig
     );
@@ -245,8 +245,8 @@ export class IbexSession {
 
     // Compute DH values
     const dhStaticStatic = await crypto.x25519(identityStore.privateKey, contact.publicKey);
-    const dhStaticEphemeral = await crypto.x25519(identityStore.privateKey, peerEphemeralPublicKey);
-    const dhEphemeralStatic = await crypto.x25519(ephemeralKeyPair.privateKey, contact.publicKey);
+    const dhEphemeralStatic = await crypto.x25519(identityStore.privateKey, peerEphemeralPublicKey);
+    const dhStaticEphemeral = await crypto.x25519(ephemeralKeyPair.privateKey, contact.publicKey);
     const dhEphemeralEphemeral = await crypto.x25519(
       ephemeralKeyPair.privateKey,
       peerEphemeralPublicKey
@@ -256,7 +256,7 @@ export class IbexSession {
     const peerRatchet2DH = await IbexSession.initKDF2DH(
       crypto,
       dhStaticStatic,
-      dhStaticEphemeral,
+      dhEphemeralStatic,
       contact.identity,
       resolvedConfig
     );
@@ -265,8 +265,8 @@ export class IbexSession {
     const { myRatchet4DH, peerRatchet4DH } = await IbexSession.initKDF4DH(
       crypto,
       dhStaticStatic,
-      dhStaticEphemeral,
       dhEphemeralStatic,
+      dhStaticEphemeral,
       dhEphemeralEphemeral,
       identityStore.identity,
       contact.identity,
@@ -314,8 +314,8 @@ export class IbexSession {
 
     // Compute DH values
     const dhStaticStatic = await crypto.x25519(identityStore.privateKey, contact.publicKey);
-    const dhStaticEphemeral = await crypto.x25519(this._myEphemeralPrivateKey, contact.publicKey);
-    const dhEphemeralStatic = await crypto.x25519(identityStore.privateKey, peerEphemeralPublicKey);
+    const dhEphemeralStatic = await crypto.x25519(this._myEphemeralPrivateKey, contact.publicKey);
+    const dhStaticEphemeral = await crypto.x25519(identityStore.privateKey, peerEphemeralPublicKey);
     const dhEphemeralEphemeral = await crypto.x25519(
       this._myEphemeralPrivateKey,
       peerEphemeralPublicKey
@@ -325,8 +325,8 @@ export class IbexSession {
     const { myRatchet4DH, peerRatchet4DH } = await IbexSession.initKDF4DH(
       crypto,
       dhStaticStatic,
-      dhStaticEphemeral,
       dhEphemeralStatic,
+      dhStaticEphemeral,
       dhEphemeralEphemeral,
       this._myIdentity,
       this._peerIdentity,
@@ -455,11 +455,11 @@ export class IbexSession {
   private static async initKDF2DH(
     crypto: CryptoProvider,
     dhStaticStatic: Uint8Array,
-    dhStaticEphemeral: Uint8Array,
+    dhEphemeralStatic: Uint8Array,
     identity: string,
     config: ResolvedIbexConfig
   ): Promise<KDFRatchet> {
-    const combined = concat(dhStaticStatic, dhStaticEphemeral);
+    const combined = concat(dhStaticStatic, dhEphemeralStatic);
     const salt = config.keSalt2DHPrefix + identity;
 
     const k0 = await crypto.blake2b256(combined, config.kdfPersonal, salt, new Uint8Array(0));
@@ -473,8 +473,8 @@ export class IbexSession {
   private static async initKDF4DH(
     crypto: CryptoProvider,
     dhStaticStatic: Uint8Array,
-    dhStaticEphemeral: Uint8Array,
     dhEphemeralStatic: Uint8Array,
+    dhStaticEphemeral: Uint8Array,
     dhEphemeralEphemeral: Uint8Array,
     myIdentity: string,
     peerIdentity: string,
@@ -483,8 +483,8 @@ export class IbexSession {
     // Hash all 4 DH outputs together
     const combined = concat(
       dhStaticStatic,
-      dhStaticEphemeral,
       dhEphemeralStatic,
+      dhStaticEphemeral,
       dhEphemeralEphemeral
     );
     const intermediateHash = await crypto.blake2b512(null, '', '', combined);
