@@ -113,6 +113,18 @@ export interface IbexProcessorEvents {
  * This is the primary entry point for using the Ibex protocol. It coordinates
  * session management, encryption, and decryption, interacting with a session
  * store and a crypto provider.
+ *
+ * @example
+ * ```ts
+ * import { IbexProcessor } from '@privatemessaging/ibex';
+ * import { MemoryIbexSessionStore } from '@privatemessaging/ibex';
+ * import { defaultCryptoProvider } from '@privatemessaging/ibex/crypto';
+ *
+ * const processor = new IbexProcessor({
+ *   sessionStore: new MemoryIbexSessionStore(),
+ *   cryptoProvider: defaultCryptoProvider,
+ * });
+ * ```
  */
 export class IbexProcessor {
   private readonly store: IbexSessionStore;

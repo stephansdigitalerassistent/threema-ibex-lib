@@ -6,6 +6,14 @@ import { bytesToHex, hexToBytes, constantTimeEqual } from '../utils/bytes.js';
  *
  * Used to identify an Ibex session between two parties.
  * Generated randomly when initiating a new session.
+ *
+ * @example
+ * ```ts
+ * import { IbexSessionId } from '@privatemessaging/ibex';
+ *
+ * // Create a session ID from a hex string
+ * const sessionId = IbexSessionId.fromHex('0123456789abcdef0123456789abcdef');
+ * ```
  */
 export class IbexSessionId {
   private readonly _bytes: Uint8Array;

@@ -21,6 +21,14 @@ export class RatchetError extends Error {
  * It ensures forward secrecy: if a message key or even a chain key is
  * compromised, past message keys cannot be recovered because the derivation
  * process is one-way.
+ *
+ * @example
+ * ```ts
+ * import { KDFRatchet } from '@privatemessaging/ibex';
+ *
+ * const initialKey = new Uint8Array(32); // 32-byte initial chain key
+ * const ratchet = new KDFRatchet(0, initialKey);
+ * ```
  */
 export class KDFRatchet {
   private _counter: number;
