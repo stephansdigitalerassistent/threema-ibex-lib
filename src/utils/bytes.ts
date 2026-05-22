@@ -28,6 +28,13 @@ export function bytesToString(bytes: Uint8Array): string {
 
 /**
  * Convert bytes to hex string
+ *
+ * @example
+ * ```ts
+ * import { bytesToHex } from '@privatemessaging/ibex';
+ *
+ * const hex = bytesToHex(new Uint8Array([1, 2, 3])); // '010203'
+ * ```
  */
 export function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
@@ -37,6 +44,13 @@ export function bytesToHex(bytes: Uint8Array): string {
 
 /**
  * Convert hex string to bytes
+ *
+ * @example
+ * ```ts
+ * import { hexToBytes } from '@privatemessaging/ibex';
+ *
+ * const bytes = hexToBytes('010203'); // Uint8Array [ 1, 2, 3 ]
+ * ```
  */
 export function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) {

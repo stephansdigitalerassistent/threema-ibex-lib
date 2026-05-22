@@ -8,6 +8,13 @@ import { getSessionState } from '../types/storage.js';
  *
  * Useful for testing and simple applications.
  * Data is lost when the process exits.
+ *
+ * @example
+ * ```ts
+ * import { MemoryIbexSessionStore } from '@privatemessaging/ibex';
+ *
+ * const store = new MemoryIbexSessionStore();
+ * ```
  */
 export class MemoryIbexSessionStore implements IbexSessionStore {
   private sessions = new Map<string, SerializedIbexSession>();
