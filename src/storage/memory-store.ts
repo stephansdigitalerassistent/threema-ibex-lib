@@ -73,15 +73,15 @@ export class MemoryIbexSessionStore implements IbexSessionStore {
     peerIdentity: string
   ): Promise<SerializedIbexSession[]> {
     const prefix = this.makePeerKey(myIdentity, peerIdentity);
-    const result: SerializedIbexSession[] = [];
+    const sessionsList: SerializedIbexSession[] = [];
 
     for (const [key, session] of this.sessions) {
       if (key.startsWith(prefix + ':')) {
-        result.push({ ...session });
+        sessionsList.push({ ...session });
       }
     }
 
-    return result;
+    return sessionsList;
   }
 
   async delete(

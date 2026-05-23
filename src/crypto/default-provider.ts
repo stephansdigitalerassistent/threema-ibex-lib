@@ -8,9 +8,9 @@ import { blake2b } from '@noble/hashes/blake2.js';
 function padString(str: string, length: number): Uint8Array {
   const encoder = new TextEncoder();
   const encoded = encoder.encode(str);
-  const result = new Uint8Array(length);
-  result.set(encoded.subarray(0, length));
-  return result;
+  const padded = new Uint8Array(length);
+  padded.set(encoded.subarray(0, length));
+  return padded;
 }
 
 /**
@@ -46,13 +46,13 @@ export class DefaultCryptoProvider implements CryptoProvider {
     const saltBytes = padString(salt, 16);
 
     // Wrap inputs/outputs in canonical Uint8Array for bundler compatibility
-    const result = blake2b(new Uint8Array(data), {
+    const digest = blake2b(new Uint8Array(data), {
       dkLen: 32,
       key: key ? new Uint8Array(key) : undefined,
       personalization: personalBytes,
       salt: saltBytes,
     });
-    return new Uint8Array(result);
+    return new Uint8Array(digest);
   }
 
   async blake2b512(
@@ -64,13 +64,13 @@ export class DefaultCryptoProvider implements CryptoProvider {
     const personalBytes = padString(personal, 16);
     const saltBytes = padString(salt, 16);
 
-    const result = blake2b(new Uint8Array(data), {
+    const digest = blake2b(new Uint8Array(data), {
       dkLen: 64,
       key: key ? new Uint8Array(key) : undefined,
       personalization: personalBytes,
       salt: saltBytes,
     });
-    return new Uint8Array(result);
+    return new Uint8Array(digest);
   }
 
   async symmetricEncrypt(
@@ -90,15 +90,15 @@ export class DefaultCryptoProvider implements CryptoProvider {
     key: Uint8Array,
     nonce: Uint8Array
   ): Promise<Uint8Array> {
-    const result = nacl.secretbox.open(
+    const decrypted = nacl.secretbox.open(
       new Uint8Array(data),
       new Uint8Array(nonce),
       new Uint8Array(key)
     );
-    if (result === null) {
+    if (decrypted === null) {
       throw new Error('Decryption failed: authentication tag mismatch');
     }
-    return result;
+    return decrypted;
   }
 
   async randomBytes(length: number): Promise<Uint8Array> {
