@@ -37,6 +37,16 @@ describe('DefaultCryptoProvider', () => {
       expect(constantTimeEqual(aliceShared, bobShared)).toBe(true);
     });
 
+    it('should verify Diffie-Hellman key agreement', async () => {
+      const alice = await crypto.generateKeyPair();
+      const bob = await crypto.generateKeyPair();
+
+      const aliceShared = await crypto.x25519(alice.privateKey, bob.publicKey);
+      const bobShared = await crypto.x25519(bob.privateKey, alice.publicKey);
+
+      expect(aliceShared).toEqual(bobShared);
+    });
+
     it('should produce different shared secrets with different keys', async () => {
       const alice = await crypto.generateKeyPair();
       const bob = await crypto.generateKeyPair();
@@ -58,6 +68,18 @@ describe('DefaultCryptoProvider', () => {
       expect(hash.length).toBe(32);
     });
 
+    it('should correctly handle null keys', async () => {
+      const data = new TextEncoder().encode('test data');
+      const hashWithNull = await crypto.blake2b256(null, '', '', data);
+
+      expect(hashWithNull).toBeInstanceOf(Uint8Array);
+      expect(hashWithNull.length).toBe(32);
+
+      const key = new Uint8Array(32).fill(0x42);
+      const hashWithKey = await crypto.blake2b256(key, '', '', data);
+      expect(constantTimeEqual(hashWithNull, hashWithKey)).toBe(false);
+    });
+
     it('should produce different hashes with different personalization', async () => {
       const data = new TextEncoder().encode('test data');
       const hash1 = await crypto.blake2b256(null, 'personal1', '', data);
@@ -66,12 +88,44 @@ describe('DefaultCryptoProvider', () => {
       expect(constantTimeEqual(hash1, hash2)).toBe(false);
     });
 
+    it('should apply personalization correctly with padding and truncation', async () => {
+      const data = new TextEncoder().encode('test data');
+
+      const shortPersonal = 'personal';
+      const paddedPersonal = 'personal\0\0\0\0\0\0\0\0';
+      const hashShort = await crypto.blake2b256(null, shortPersonal, '', data);
+      const hashPadded = await crypto.blake2b256(null, paddedPersonal, '', data);
+      expect(hashShort).toEqual(hashPadded);
+
+      const exactPersonal = '1234567890123456';
+      const longPersonal = '1234567890123456extra_chars';
+      const hashExact = await crypto.blake2b256(null, exactPersonal, '', data);
+      const hashLong = await crypto.blake2b256(null, longPersonal, '', data);
+      expect(hashExact).toEqual(hashLong);
+    });
+
     it('should produce different hashes with different salts', async () => {
       const data = new TextEncoder().encode('test data');
       const hash1 = await crypto.blake2b256(null, '', 'salt1', data);
       const hash2 = await crypto.blake2b256(null, '', 'salt2', data);
 
       expect(constantTimeEqual(hash1, hash2)).toBe(false);
+    });
+
+    it('should apply salt correctly with padding and truncation', async () => {
+      const data = new TextEncoder().encode('test data');
+
+      const shortSalt = 'salt';
+      const paddedSalt = 'salt\0\0\0\0\0\0\0\0\0\0\0\0';
+      const hashShort = await crypto.blake2b256(null, '', shortSalt, data);
+      const hashPadded = await crypto.blake2b256(null, '', paddedSalt, data);
+      expect(hashShort).toEqual(hashPadded);
+
+      const exactSalt = '1234567890123456';
+      const longSalt = '1234567890123456extra_chars';
+      const hashExact = await crypto.blake2b256(null, '', exactSalt, data);
+      const hashLong = await crypto.blake2b256(null, '', longSalt, data);
+      expect(hashExact).toEqual(hashLong);
     });
 
     it('should produce keyed MAC with key provided', async () => {
