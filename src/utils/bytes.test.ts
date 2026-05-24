@@ -28,6 +28,13 @@ describe('bytes utilities', () => {
       expect(result).toEqual(new Uint8Array([1, 2]));
     });
 
+    it('should handle concatenating only empty arrays', () => {
+      const a = new Uint8Array([]);
+      const b = new Uint8Array([]);
+      const result = concat(a, b);
+      expect(result).toEqual(new Uint8Array([]));
+    });
+
     it('should return an empty array if no arrays are provided', () => {
       const result = concat();
       expect(result).toEqual(new Uint8Array([]));
@@ -38,6 +45,15 @@ describe('bytes utilities', () => {
       const result = concat(a);
       expect(result).toEqual(a);
       expect(result).not.toBe(a);
+    });
+
+    it('should not be affected by modifying input arrays after concatenation', () => {
+      const a = new Uint8Array([1, 2]);
+      const b = new Uint8Array([3, 4]);
+      const result = concat(a, b);
+      a[0] = 9;
+      b[1] = 9;
+      expect(result).toEqual(new Uint8Array([1, 2, 3, 4]));
     });
   });
 
@@ -61,6 +77,19 @@ describe('bytes utilities', () => {
       expect(bytes.length).toBe(0);
       expect(bytesToString(bytes)).toBe(str);
     });
+
+    it('should handle strings with control and null characters', () => {
+      const str = 'hello\n\r\t\0world';
+      const bytes = stringToBytes(str);
+      expect(bytesToString(bytes)).toBe(str);
+    });
+
+    it('should handle long strings', () => {
+      const str = 'a'.repeat(10000);
+      const bytes = stringToBytes(str);
+      expect(bytes.length).toBe(10000);
+      expect(bytesToString(bytes)).toBe(str);
+    });
   });
 
   describe('bytesToHex', () => {
@@ -71,6 +100,11 @@ describe('bytes utilities', () => {
 
     it('should return empty string for empty bytes', () => {
       expect(bytesToHex(new Uint8Array([]))).toBe('');
+    });
+
+    it('should convert single byte arrays correctly', () => {
+      expect(bytesToHex(new Uint8Array([0]))).toBe('00');
+      expect(bytesToHex(new Uint8Array([255]))).toBe('ff');
     });
   });
 
@@ -93,6 +127,11 @@ describe('bytes utilities', () => {
     it('should return empty bytes for empty string', () => {
       expect(hexToBytes('')).toEqual(new Uint8Array([]));
     });
+
+    it('should parse single hex byte pairs correctly', () => {
+      expect(hexToBytes('00')).toEqual(new Uint8Array([0]));
+      expect(hexToBytes('ff')).toEqual(new Uint8Array([255]));
+    });
   });
 
   describe('constantTimeEqual', () => {
@@ -106,6 +145,13 @@ describe('bytes utilities', () => {
       const a = new Uint8Array([]);
       const b = new Uint8Array([]);
       expect(constantTimeEqual(a, b)).toBe(true);
+    });
+
+    it('should return false when comparing an empty array with a non-empty array', () => {
+      const a = new Uint8Array([]);
+      const b = new Uint8Array([0]);
+      expect(constantTimeEqual(a, b)).toBe(false);
+      expect(constantTimeEqual(b, a)).toBe(false);
     });
 
     it('should return false for arrays of different lengths', () => {
@@ -124,6 +170,31 @@ describe('bytes utilities', () => {
       // Diff last byte
       expect(constantTimeEqual(a, new Uint8Array([1, 2, 3, 0]))).toBe(false);
     });
+
+    it('should return false for arrays of identical lengths but completely different content', () => {
+      const a = new Uint8Array([1, 2, 3, 4]);
+      const b = new Uint8Array([5, 6, 7, 8]);
+      expect(constantTimeEqual(a, b)).toBe(false);
+    });
+
+    it('should handle large equal arrays', () => {
+      const a = new Uint8Array(1000).fill(42);
+      const b = new Uint8Array(1000).fill(42);
+      expect(constantTimeEqual(a, b)).toBe(true);
+    });
+
+    it('should return false for large arrays differing by one byte at the end', () => {
+      const a = new Uint8Array(1000).fill(42);
+      const b = new Uint8Array(1000).fill(42);
+      b[999] = 43;
+      expect(constantTimeEqual(a, b)).toBe(false);
+    });
+
+    it('should return false for large arrays of different lengths', () => {
+      const a = new Uint8Array(1000).fill(42);
+      const b = new Uint8Array(1001).fill(42);
+      expect(constantTimeEqual(a, b)).toBe(false);
+    });
   });
 
   describe('zeroize', () => {
@@ -137,6 +208,13 @@ describe('bytes utilities', () => {
       const arr = new Uint8Array([]);
       zeroize(arr);
       expect(arr).toEqual(new Uint8Array([]));
+    });
+
+    it('should mutate the exact same array reference in place', () => {
+      const arr = new Uint8Array([1, 2, 3]);
+      const ref = arr;
+      zeroize(arr);
+      expect(arr).toBe(ref);
     });
   });
 
@@ -152,5 +230,13 @@ describe('bytes utilities', () => {
       expect(nonce.length).toBe(0);
       expect(nonce).toEqual(new Uint8Array(0));
     });
+
+    it('should return a new Uint8Array instance each time', () => {
+      const nonce1 = zeroNonce(5);
+      const nonce2 = zeroNonce(5);
+      expect(nonce1).toEqual(nonce2);
+      expect(nonce1).not.toBe(nonce2);
+    });
   });
 });
+
