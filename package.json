@@ -36,19 +36,7 @@
   ],
   "author": "",
   "license": "MIT",
-  "peerDependencies": {
-    "@noble/hashes": "^2.0.0",
-    "tweetnacl": "^1.0.3"
-  },
-  "peerDependenciesMeta": {
-    "@noble/hashes": {
-      "optional": true
-    },
-    "tweetnacl": {
-      "optional": true
-    }
-  },
-  "optionalDependencies": {
+  "dependencies": {
     "@noble/hashes": "^2.2.0",
     "tweetnacl": "^1.0.3"
   },
