@@ -90,3 +90,14 @@ export function zeroize(arr: Uint8Array): void {
 export function zeroNonce(length: number): Uint8Array {
   return new Uint8Array(length);
 }
+
+/**
+ * Pad or truncate a string to exactly `length` bytes
+ */
+export function padString(str: string, length: number): Uint8Array {
+  const encoder = new TextEncoder();
+  const encoded = encoder.encode(str);
+  const padded = new Uint8Array(length);
+  padded.set(encoded.subarray(0, length));
+  return padded;
+}

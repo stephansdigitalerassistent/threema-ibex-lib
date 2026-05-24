@@ -1,17 +1,7 @@
 import type { CryptoProvider, KeyPair } from '../types/crypto.js';
 import nacl from 'tweetnacl';
 import { blake2b } from '@noble/hashes/blake2.js';
-
-/**
- * Pad or truncate a string to exactly `length` bytes
- */
-function padString(str: string, length: number): Uint8Array {
-  const encoder = new TextEncoder();
-  const encoded = encoder.encode(str);
-  const padded = new Uint8Array(length);
-  padded.set(encoded.subarray(0, length));
-  return padded;
-}
+import { padString } from '../utils/bytes.js';
 
 /**
  * Default crypto provider using tweetnacl and @noble/hashes

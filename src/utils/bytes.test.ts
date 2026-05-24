@@ -8,6 +8,7 @@ import {
   constantTimeEqual,
   zeroize,
   zeroNonce,
+  padString,
 } from './bytes.js';
 
 describe('bytes utilities', () => {
@@ -236,6 +237,49 @@ describe('bytes utilities', () => {
       const nonce2 = zeroNonce(5);
       expect(nonce1).toEqual(nonce2);
       expect(nonce1).not.toBe(nonce2);
+    });
+  });
+
+  describe('padString', () => {
+    it('should pad shorter strings with zeros to the specified length', () => {
+      const result = padString('hello', 10);
+      expect(result.length).toBe(10);
+      expect(result).toEqual(new Uint8Array([104, 101, 108, 108, 111, 0, 0, 0, 0, 0]));
+    });
+
+    it('should return exact bytes if string length matches the specified length', () => {
+      const result = padString('hello', 5);
+      expect(result.length).toBe(5);
+      expect(result).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
+    });
+
+    it('should truncate longer strings to the specified byte length', () => {
+      const result = padString('hello world', 5);
+      expect(result.length).toBe(5);
+      expect(result).toEqual(new Uint8Array([104, 101, 108, 108, 111]));
+    });
+
+    it('should handle multi-byte UTF-8 characters correctly during truncation', () => {
+      // 🦬 is 4 bytes in UTF-8: [240, 159, 166, 172]
+      const result = padString('🦬', 2);
+      expect(result.length).toBe(2);
+      expect(result).toEqual(new Uint8Array([240, 159]));
+    });
+
+    it('should pad an empty string with zeros to the specified length', () => {
+      const result = padString('', 5);
+      expect(result.length).toBe(5);
+      expect(result).toEqual(new Uint8Array([0, 0, 0, 0, 0]));
+    });
+
+    it('should return an empty Uint8Array when length is 0', () => {
+      const result1 = padString('hello', 0);
+      expect(result1.length).toBe(0);
+      expect(result1).toEqual(new Uint8Array(0));
+
+      const result2 = padString('', 0);
+      expect(result2.length).toBe(0);
+      expect(result2).toEqual(new Uint8Array(0));
     });
   });
 });
