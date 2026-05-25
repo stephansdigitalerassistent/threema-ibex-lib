@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { IbexSession, Contact, IdentityStore } from './ibex-session.js';
+import { IbexSession, Contact, IdentityStore, IbexSessionError } from './ibex-session.js';
 import { DefaultCryptoProvider } from '../crypto/default-provider.js';
 import { IbexSessionState } from '../types/common.js';
 
@@ -316,3 +316,16 @@ describe('IbexSession', () => {
     });
   });
 });
+
+describe('IbexSessionError', () => {
+  it('should correctly assign the message, set its name property, and preserve prototype chain', () => {
+    const message = 'Test error message';
+    const error = new IbexSessionError(message);
+
+    expect(error.message).toBe(message);
+    expect(error.name).toBe('IbexSessionError');
+    expect(error instanceof Error).toBe(true);
+    expect(error instanceof IbexSessionError).toBe(true);
+  });
+});
+
