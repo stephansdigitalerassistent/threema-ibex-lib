@@ -27,9 +27,9 @@ export class IbexSessionError extends Error {
  */
 export interface IbexVersions {
   /** Protocol version used for local (outgoing) 4DH messages */
-  local: Version;
+  readonly local: Version;
   /** Protocol version used for remote (incoming) 4DH messages */
-  remote: Version;
+  readonly remote: Version;
 }
 
 /**
@@ -37,9 +37,9 @@ export interface IbexVersions {
  */
 export interface Contact {
   /** Unique identifier for the contact (e.g., Threema ID) */
-  identity: string;
+  readonly identity: string;
   /** The contact's long-term X25519 public key */
-  publicKey: Uint8Array;
+  readonly publicKey: Uint8Array;
 }
 
 /**
