@@ -142,6 +142,11 @@ describe('bytes utilities', () => {
       expect(constantTimeEqual(a, b)).toBe(true);
     });
 
+    it('should return true when comparing the exact same array reference', () => {
+      const a = new Uint8Array([1, 2, 3, 4]);
+      expect(constantTimeEqual(a, a)).toBe(true);
+    });
+
     it('should return true for empty arrays', () => {
       const a = new Uint8Array([]);
       const b = new Uint8Array([]);
@@ -162,6 +167,32 @@ describe('bytes utilities', () => {
       expect(constantTimeEqual(b, a)).toBe(false);
     });
 
+    it('should return false when one array is a prefix of the other', () => {
+      const a = new Uint8Array([1, 2, 3]);
+      const b = new Uint8Array([1, 2, 3, 4]);
+      expect(constantTimeEqual(a, b)).toBe(false);
+      expect(constantTimeEqual(b, a)).toBe(false);
+    });
+
+    it('should return false when different length arrays differ only in trailing zero bytes', () => {
+      const a = new Uint8Array([1, 2, 3]);
+      const b = new Uint8Array([1, 2, 3, 0]);
+      expect(constantTimeEqual(a, b)).toBe(false);
+      expect(constantTimeEqual(b, a)).toBe(false);
+    });
+
+    it('should work correctly with Uint8Array subarrays', () => {
+      const full = new Uint8Array([0, 1, 2, 3, 4, 5]);
+      const sub1 = full.subarray(1, 4); // [1, 2, 3]
+      const sub2 = full.subarray(1, 4); // [1, 2, 3]
+      const other = new Uint8Array([1, 2, 3]);
+      expect(constantTimeEqual(sub1, sub2)).toBe(true);
+      expect(constantTimeEqual(sub1, other)).toBe(true);
+
+      const subDiff = full.subarray(2, 5); // [2, 3, 4]
+      expect(constantTimeEqual(sub1, subDiff)).toBe(false);
+    });
+
     it('should return false if content differs by one byte', () => {
       const a = new Uint8Array([1, 2, 3, 4]);
       // Diff first byte
@@ -170,6 +201,23 @@ describe('bytes utilities', () => {
       expect(constantTimeEqual(a, new Uint8Array([1, 2, 9, 4]))).toBe(false);
       // Diff last byte
       expect(constantTimeEqual(a, new Uint8Array([1, 2, 3, 0]))).toBe(false);
+    });
+
+    it('should return false if one byte differs by only a single bit', () => {
+      const a = new Uint8Array([0b00000001]);
+      const b = new Uint8Array([0b00000000]);
+      expect(constantTimeEqual(a, b)).toBe(false);
+    });
+
+    it('should handle all possible single-byte values from 0 to 255 correctly', () => {
+      for (let i = 0; i < 256; i++) {
+        const a = new Uint8Array([i]);
+        const b = new Uint8Array([i]);
+        expect(constantTimeEqual(a, b)).toBe(true);
+
+        const c = new Uint8Array([(i + 1) % 256]);
+        expect(constantTimeEqual(a, c)).toBe(false);
+      }
     });
 
     it('should return false for arrays of identical lengths but completely different content', () => {
@@ -280,6 +328,50 @@ describe('bytes utilities', () => {
       const result2 = padString('', 0);
       expect(result2.length).toBe(0);
       expect(result2).toEqual(new Uint8Array(0));
+    });
+
+    it('should throw a RangeError if length is negative', () => {
+      expect(() => padString('hello', -1)).toThrow(RangeError);
+      expect(() => padString('', -5)).toThrow(RangeError);
+    });
+
+    it('should return a new Uint8Array instance and not reuse any reference', () => {
+      const result1 = padString('hello', 5);
+      const result2 = padString('hello', 5);
+      expect(result1).toEqual(result2);
+      expect(result1).not.toBe(result2);
+    });
+
+    it('should handle multi-byte UTF-8 characters with exact matching length', () => {
+      // 🦬 is 4 bytes in UTF-8: [240, 159, 166, 172]
+      const result = padString('🦬', 4);
+      expect(result.length).toBe(4);
+      expect(result).toEqual(new Uint8Array([240, 159, 166, 172]));
+    });
+
+    it('should pad multi-byte UTF-8 character strings when target length is greater than byte length', () => {
+      const result = padString('🦬', 6);
+      expect(result.length).toBe(6);
+      expect(result).toEqual(new Uint8Array([240, 159, 166, 172, 0, 0]));
+    });
+
+    it('should handle strings containing null bytes', () => {
+      const result = padString('a\0b', 5);
+      expect(result.length).toBe(5);
+      expect(result).toEqual(new Uint8Array([97, 0, 98, 0, 0]));
+    });
+
+    it('should handle extremely long strings and truncate them properly', () => {
+      const longStr = 'a'.repeat(10000);
+      const result = padString(longStr, 10);
+      expect(result.length).toBe(10);
+      expect(result).toEqual(new Uint8Array(10).fill(97));
+    });
+
+    it('should handle non-integer lengths by truncating them (standard Uint8Array behavior)', () => {
+      const result = padString('hello', 3.7);
+      expect(result.length).toBe(3);
+      expect(result).toEqual(new Uint8Array([104, 101, 108]));
     });
   });
 });
