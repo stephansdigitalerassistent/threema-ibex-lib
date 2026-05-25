@@ -58,6 +58,12 @@ export interface RatchetIdentifier {
 /**
  * Result of committing a peer ratchet's state.
  */
+/**
+ * Result of committing a peer ratchet's state.
+ *
+ * Indicates whether the ratchet was successfully advanced or if it failed because
+ * the session or ratchet could not be located.
+ */
 export type CommitResult =
   | { committed: true }
   | { committed: false; reason: 'session_not_found' | 'ratchet_not_found' };
@@ -133,9 +139,13 @@ export class IbexProcessor {
   private readonly events: IbexProcessorEvents;
 
   /**
-   * Create a new IbexProcessor.
+   * Creates a new IbexProcessor instance.
    *
-   * @param options - Configuration options
+   * @param options - Configuration and dependency options.
+   * @param options.sessionStore - Store for persisting and retrieving Ibex session states.
+   * @param options.cryptoProvider - Provider for cryptographic operations (ECDH, hashing, encryption).
+   * @param options.config - Optional protocol configuration settings overrides.
+   * @param options.events - Optional callbacks for processor lifecycle events.
    */
   constructor(options: {
     /** Store for persisting Ibex sessions */
@@ -154,15 +164,23 @@ export class IbexProcessor {
   }
 
   /**
-   * Encapsulate a plaintext message for a contact.
+   * Encapsulates (encrypts) a plaintext message for a target contact, performing session establishment if needed.
    *
-   * If no active session exists with the contact, a new session is initiated,
-   * and an `IbexInit` message is prepended to the result.
+   * Cryptographic flow:
+   * 1. Looks up the best existing session for the peer.
+   * 2. If no session is found, initiates a new one using {@link IbexSession.createAsInitiator},
+   *    and generates an `IbexInit` message prepended to the message queue.
+   * 3. Encrypts the plaintext using the current active ratchet (prioritizing 4DH over 2DH)
+   *    and advances the local outgoing ratchet.
+   * 4. Updates the outgoing message timestamp.
    *
-   * @param contact - Remote contact to send to
-   * @param identityStore - Local identity store
-   * @param plaintext - Data to encrypt
-   * @returns The messages to send and the updated session state
+   * @param contact - The recipient's identity and long-term public key.
+   * @param identityStore - Local identity store containing long-term identity keys.
+   * @param plaintext - Raw bytes of the message to encrypt.
+   * @returns A Promise resolving to the {@link EncapsulationResult} containing:
+   *          - `messages`: Array of messages to send over the network (e.g., [Init, Message] or just [Message]).
+   *          - `session`: The updated session object. The caller MUST persist this session state.
+   *          - `mode`: The encryption mode applied (2DH or 4DH).
    */
   async encapsulate(
     contact: Contact,
@@ -254,12 +272,20 @@ export class IbexProcessor {
   }
 
   /**
-   * Process an incoming Init message from a peer.
+   * Processes an incoming session initiation request (`IbexInit`) from a peer contact.
    *
-   * @param contact - The peer sending the Init
-   * @param identityStore - Local identity store
-   * @param init - The Init message
-   * @returns An Accept message to establish the session, or Terminate on failure
+   * Cryptographic/Session flow:
+   * 1. Verifies if a session with this ID already exists. If yes, rejects/ignores it with a `Terminate` message.
+   * 2. Clears older sessions with this peer to prevent duplicate/stale state.
+   * 3. Initializes a new responder session using {@link IbexSession.createAsResponder}.
+   * 4. Persists the responder session in the session store.
+   * 5. Returns an `IbexAccept` message to transmit back to the initiator.
+   *
+   * @param contact - The initiator's contact details.
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param init - The incoming `IbexInit` message.
+   * @returns A Promise resolving to an `IbexAccept` message on success (to be sent to the initiator),
+   *          or an `IbexTerminate` message if session creation or version negotiation fails.
    */
   async processInit(
     contact: Contact,
@@ -318,11 +344,17 @@ export class IbexProcessor {
   }
 
   /**
-   * Process an incoming Accept message (as initiator).
+   * Processes an incoming `IbexAccept` handshake response from a responder contact.
    *
-   * @param contact - The peer sending the Accept
-   * @param identityStore - Local identity store
-   * @param accept - The Accept message
+   * Cryptographic/Session flow:
+   * 1. Retrieves the matching session from storage.
+   * 2. Computes the 4DH key agreements and transitions the session state to established 4DH (`RL44`).
+   * 3. Persists the updated session in the session store.
+   *
+   * @param contact - The responder's contact details.
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param accept - The incoming `IbexAccept` message.
+   * @throws {Error} If no session with the corresponding session ID is found in the store.
    */
   async processAccept(
     contact: Contact,
@@ -357,15 +389,24 @@ export class IbexProcessor {
   }
 
   /**
-   * Process an encapsulated incoming IbexMessage.
+   * Decrypts an incoming encrypted message (`IbexMessage`) using the appropriate session.
    *
-   * This decodes and decrypts the message, advancing the peer's ratchet
-   * state if necessary to match the message counter.
+   * Cryptographic/Session flow:
+   * 1. Retrieves the session from storage.
+   * 2. Selects the appropriate incoming ratchet (2DH or 4DH) based on the message type.
+   * 3. Fast-forwards the ratchet state to match the message counter if messages were skipped.
+   * 4. Derives the message decryption key and decrypts the ciphertext.
+   * 5. Discards the peer's 2DH ratchet if the message is 4DH (completes responder transition to `RL44`).
+   * 6. Persists the updated session state (note: the ratchet key is not advanced yet).
    *
-   * @param contact - The peer sending the message
-   * @param identityStore - Local identity store
-   * @param message - The Ibex message
-   * @returns DecryptionResult on success, or IbexReject on failure
+   * **Important:** The recipient MUST call {@link IbexProcessor.commitPeerRatchet} after successfully
+   * processing the message content to advance the ratchet state and prevent message key reuse.
+   *
+   * @param contact - The sender's contact details.
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param message - The incoming `IbexMessage` to decrypt.
+   * @returns A Promise resolving to a {@link DecryptionResult} containing the plaintext on success,
+   *          or an `IbexReject` message to return to the sender if decryption or validation fails.
    */
   async processMessage(
     contact: Contact,
@@ -467,14 +508,16 @@ export class IbexProcessor {
   }
 
   /**
-   * Commit the peer ratchet after message processing is complete.
+   * Commits the peer ratchet state by advancing it to the next ratchet turn.
    *
-   * Advancing the ratchet only AFTER processing ensures that if the app crashes
-   * or fails to process a message, it can be retried with the same key.
+   * This is a critical post-decryption step. In the double-ratchet pattern, keys are
+   * advanced and consumed immediately upon successful message processing. Delaying this
+   * step until the application has fully processed the decrypted content ensures that
+   * transient processing failures do not cause permanent message loss (allowing retries).
    *
-   * @param identityStore - Local identity store
-   * @param ratchetId - Identifier for the ratchet to advance
-   * @returns Result indicating whether the commit succeeded
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param ratchetId - The identifier indicating which ratchet in which session to commit.
+   * @returns A Promise resolving to a {@link CommitResult} indicating status of the operation.
    */
   async commitPeerRatchet(
     identityStore: IdentityStore,
@@ -506,7 +549,13 @@ export class IbexProcessor {
   }
 
   /**
-   * Process a Reject message
+   * Processes an incoming `IbexReject` message, terminating the associated session.
+   *
+   * Deletes the session from the session store and emits a session termination event.
+   *
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param contact - The peer who sent the reject message.
+   * @param reject - The incoming `IbexReject` message.
    */
   async processReject(
     identityStore: IdentityStore,
@@ -524,7 +573,13 @@ export class IbexProcessor {
   }
 
   /**
-   * Process a Terminate message
+   * Processes an incoming `IbexTerminate` message, terminating the associated session.
+   *
+   * Deletes the session from the session store and emits a session termination event.
+   *
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param contact - The peer who sent the terminate message.
+   * @param terminate - The incoming `IbexTerminate` message.
    */
   async processTerminate(
     identityStore: IdentityStore,
@@ -541,7 +596,15 @@ export class IbexProcessor {
   }
 
   /**
-   * Clear and terminate all sessions with a contact
+   * Clears and terminates all active and historical sessions with a specific contact.
+   *
+   * This sends termination notices to the remote party and deletes all sessions
+   * associated with the contact from local storage.
+   *
+   * @param identityStore - Local identity store containing long-term keys.
+   * @param contact - The peer contact whose sessions should be cleared.
+   * @param cause - The reason for terminating the sessions.
+   * @returns A Promise resolving to an array of `IbexTerminate` messages to send to the contact.
    */
   async clearAndTerminateAllSessions(
     identityStore: IdentityStore,
