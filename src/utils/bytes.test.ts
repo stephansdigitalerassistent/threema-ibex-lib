@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { Worker } from 'node:worker_threads';
+import * as os from 'node:os';
 import {
   concat,
   stringToBytes,
@@ -243,6 +245,58 @@ describe('bytes utilities', () => {
       const a = new Uint8Array(1000).fill(42);
       const b = new Uint8Array(1001).fill(42);
       expect(constantTimeEqual(a, b)).toBe(false);
+    });
+
+    it('should exhibit constant-time execution characteristics under CPU load', async () => {
+      const a = new Uint8Array(1000).fill(42);
+      const c = new Uint8Array(1000).fill(42); c[0] = 43;
+      const d = new Uint8Array(1000).fill(42); d[999] = 43;
+
+      const runBenchmark = (fn: (x: Uint8Array, y: Uint8Array) => boolean, x: Uint8Array, y: Uint8Array, iterations: number): number => {
+        const start = performance.now();
+        for (let i = 0; i < iterations; i++) {
+          fn(x, y);
+        }
+        const end = performance.now();
+        return end - start;
+      };
+
+      const nonConstantTimeEqual = (x: Uint8Array, y: Uint8Array): boolean => {
+        if (x.length !== y.length) return false;
+        for (let i = 0; i < x.length; i++) {
+          if (x[i] !== y[i]) return false;
+        }
+        return true;
+      };
+
+      const workers: Worker[] = [];
+      try {
+        const numCPUs = os.cpus().length;
+        for (let i = 0; i < numCPUs; i++) {
+          const w = new Worker('while(true) { Math.random(); }', { eval: true });
+          workers.push(w);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const iterations = 30000;
+        const ctDiff0 = runBenchmark(constantTimeEqual, a, c, iterations);
+        const ctDiffEnd = runBenchmark(constantTimeEqual, a, d, iterations);
+
+        const nonCtDiff0 = runBenchmark(nonConstantTimeEqual, a, c, iterations);
+        const nonCtDiffEnd = runBenchmark(nonConstantTimeEqual, a, d, iterations);
+
+        const ctRatio = ctDiffEnd / ctDiff0;
+        const nonCtRatio = nonCtDiffEnd / nonCtDiff0;
+
+        expect(ctRatio).toBeGreaterThan(0.4);
+        expect(ctRatio).toBeLessThan(2.5);
+        expect(nonCtRatio).toBeGreaterThan(4.0);
+      } finally {
+        for (const w of workers) {
+          await w.terminate();
+        }
+      }
     });
   });
 
