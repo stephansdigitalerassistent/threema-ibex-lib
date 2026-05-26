@@ -10,6 +10,11 @@ import { concat, zeroize } from '../utils/bytes.js';
  * Error thrown for invalid Ibex session states
  */
 export class IbexSessionError extends Error {
+  /**
+   * Creates a new IbexSessionError.
+   *
+   * @param message - The error message description.
+   */
   constructor(message: string) {
     super(message);
     this.name = 'IbexSessionError';
@@ -22,9 +27,9 @@ export class IbexSessionError extends Error {
  */
 export interface IbexVersions {
   /** Protocol version used for local (outgoing) 4DH messages */
-  local: Version;
+  readonly local: Version;
   /** Protocol version used for remote (incoming) 4DH messages */
-  remote: Version;
+  readonly remote: Version;
 }
 
 /**
@@ -32,9 +37,9 @@ export interface IbexVersions {
  */
 export interface Contact {
   /** Unique identifier for the contact (e.g., Threema ID) */
-  identity: string;
+  readonly identity: string;
   /** The contact's long-term X25519 public key */
-  publicKey: Uint8Array;
+  readonly publicKey: Uint8Array;
 }
 
 /**
@@ -56,10 +61,41 @@ export interface IdentityStore {
  * Provides double-ratchet-like forward secrecy using X25519 for Diffie-Hellman
  * and BLAKE2b for key derivation.
  *
- * A session progresses through several states:
- * 1. Initiator starts with 2DH (L20).
- * 2. Responder receives Init and responds with Accept (moves to RL44).
- * 3. Initiator receives Accept (moves to RL44).
+ * ### Cryptographic Session Lifecycle & State Transitions
+ *
+ * The session progresses through several states depending on the exchange of ephemeral keys:
+ *
+ * 1. **Initiator Session Creation (`L20` - Local 2DH):**
+ *    - The initiator calls {@link IbexSession.createAsInitiator}.
+ *    - Initiator generates a local ephemeral X25519 keypair.
+ *    - Performs ECDH over static-static and ephemeral-static key combinations to derive `myRatchet2DH`.
+ *    - State is `L20` (has local 2DH outgoing ratchet, no incoming or 4DH ratchets).
+ *    - Initiator transmits `IbexInit` to the responder.
+ *
+ * 2. **Responder Session Creation (`R24` - Remote 2DH + 4DH):**
+ *    - The responder receives `IbexInit` and calls {@link IbexSession.createAsResponder}.
+ *    - Responder generates its own ephemeral X25519 keypair.
+ *    - Computes 2DH (for incoming) and full 4DH key agreements (static-static, ephemeral-static,
+ *      static-ephemeral, ephemeral-ephemeral) to initialize `peerRatchet2DH`, `myRatchet4DH`, and `peerRatchet4DH`.
+ *    - State is `R24` (ready to send 4DH, can still receive 2DH messages).
+ *    - Responder transmits `IbexAccept` to the initiator.
+ *
+ * 3. **Initiator Accept Processing (`RL44` - Established 4DH):**
+ *    - The initiator receives `IbexAccept` and calls {@link IbexSession.processAccept}.
+ *    - Computes full 4DH agreements using the responder's ephemeral public key.
+ *    - Initializes `myRatchet4DH` and `peerRatchet4DH`.
+ *    - Discards `myRatchet2DH` and zeroizes the local ephemeral private key.
+ *    - State becomes `RL44` (both parties on 4DH).
+ *
+ * 4. **Responder Handshake Completion (`RL44` - Established 4DH):**
+ *    - When the responder receives the first 4DH message, it discards `peerRatchet2DH`.
+ *    - State transitions from `R24` to `RL44`.
+ *
+ * 5. **State Summary:**
+ *    - `L20`: Initiator post-init. Only has `myRatchet2DH`.
+ *    - `R20`: Responder post-init, before accepting (unused/intermediate state). Only has `peerRatchet2DH`.
+ *    - `R24`: Responder post-accept. Has `peerRatchet2DH`, `myRatchet4DH`, `peerRatchet4DH`.
+ *    - `RL44`: Fully established. Has `myRatchet4DH` and `peerRatchet4DH`.
  */
 export class IbexSession {
   private readonly _id: IbexSessionId;
@@ -79,6 +115,27 @@ export class IbexSession {
   static readonly SUPPORTED_VERSION_MIN: Version = V.V1_0;
   static readonly SUPPORTED_VERSION_MAX: Version = V.V1_2;
 
+  /**
+   * Private constructor to instantiate an Ibex session.
+   *
+   * Library consumers should use factory methods:
+   * - {@link IbexSession.createAsInitiator}
+   * - {@link IbexSession.createAsResponder}
+   * - {@link IbexSession.restore}
+   *
+   * @param id - Unique session identifier.
+   * @param myIdentity - Local user's identity string.
+   * @param peerIdentity - Remote user's identity string.
+   * @param myEphemeralPrivateKey - Local ephemeral X25519 private key, or null if discarded.
+   * @param myEphemeralPublicKey - Local ephemeral X25519 public key.
+   * @param current4DHVersions - Currently negotiated protocol versions for 4DH communication.
+   * @param lastOutgoingMessageTimestamp - Unix timestamp in milliseconds when the last message was sent.
+   * @param myRatchet2DH - Outgoing 2DH KDF ratchet, if active.
+   * @param myRatchet4DH - Outgoing 4DH KDF ratchet, if active.
+   * @param peerRatchet2DH - Incoming 2DH KDF ratchet, if active.
+   * @param peerRatchet4DH - Incoming 4DH KDF ratchet, if active.
+   * @param config - The resolved session configuration settings.
+   */
   private constructor(
     id: IbexSessionId,
     myIdentity: string,
@@ -219,7 +276,9 @@ export class IbexSession {
   }
 
   /**
-   * Get the supported version range
+   * Returns the protocol version range supported by this library implementation.
+   *
+   * @returns The supported VersionRange (min to max).
    */
   static getSupportedVersionRange(): VersionRange {
     return {
@@ -229,7 +288,17 @@ export class IbexSession {
   }
 
   /**
-   * Create a new session as the initiator
+   * Creates a new Ibex session as the initiator.
+   *
+   * This initiates the handshake by generating a new session ID and local ephemeral keypair,
+   * performing a 2DH key agreement, and creating the outgoing 2DH ratchet.
+   * The session will start in the `L20` state.
+   *
+   * @param contact - The peer's identity and long-term public key.
+   * @param identityStore - The local identity store containing long-term keys.
+   * @param crypto - Cryptographic provider for X25519 and BLAKE2b operations.
+   * @param config - Optional configuration parameter overrides.
+   * @returns A Promise resolving to the initialized `IbexSession`.
    */
   static async createAsInitiator(
     contact: Contact,
@@ -270,7 +339,26 @@ export class IbexSession {
   }
 
   /**
-   * Create a new session as the responder
+   * Creates a new Ibex session as the responder in response to an initiator's session invitation.
+   *
+   * This completes the handshake setup on the responder's side by:
+   * 1. Negotiating the protocol version.
+   * 2. Generating a local ephemeral X25519 keypair.
+   * 3. Computing 2DH and full 4DH key agreements.
+   * 4. Initializing incoming 2DH, outgoing 4DH, and incoming 4DH ratchets.
+   *
+   * The session starts in the `R24` state, prepared to decrypt incoming 2DH messages
+   * and encrypt outgoing messages using the higher-security 4DH ratchet.
+   *
+   * @param sessionId - The session ID proposed by the initiator.
+   * @param peerVersionRange - Supported protocol versions of the initiator.
+   * @param peerEphemeralPublicKey - Ephemeral public key sent by the initiator.
+   * @param contact - The peer's identity and long-term public key.
+   * @param identityStore - The local identity store containing long-term keys.
+   * @param crypto - Cryptographic provider for X25519 and BLAKE2b operations.
+   * @param config - Optional configuration parameter overrides.
+   * @returns A Promise resolving to the initialized `IbexSession`.
+   * @throws {IbexSessionError} If the peer's ephemeral public key is malformed or if version negotiation fails.
    */
   static async createAsResponder(
     sessionId: IbexSessionId,
@@ -342,7 +430,21 @@ export class IbexSession {
   }
 
   /**
-   * Process an Accept message (as initiator)
+   * Processes an incoming Accept message from the responder to establish the session.
+   *
+   * This transitions the session from `L20` (Local 2DH) to `RL44` (Established 4DH) by:
+   * 1. Negotiating the final protocol version.
+   * 2. Performing a full 4DH key agreement using the responder's ephemeral public key.
+   * 3. Initializing the outgoing and incoming 4DH ratchets.
+   * 4. Discarding the temporary 2DH ratchet.
+   * 5. Zeroizing and discarding the local ephemeral private key.
+   *
+   * @param peerVersionRange - The protocol version range supported by the responder.
+   * @param peerEphemeralPublicKey - The responder's ephemeral X25519 public key.
+   * @param contact - The responder's identity and long-term public key.
+   * @param identityStore - The local identity store containing long-term keys.
+   * @param crypto - Cryptographic provider for X25519 and BLAKE2b operations.
+   * @throws {IbexSessionError} If the ephemeral private key was already discarded, the public key is invalid, or version negotiation fails.
    */
   async processAccept(
     peerVersionRange: VersionRange,
@@ -397,21 +499,28 @@ export class IbexSession {
   }
 
   /**
-   * Discard the peer's 2DH ratchet (after receiving first 4DH message)
+   * Discards the responder's incoming 2DH ratchet.
+   *
+   * This completes the final transition to pure 4DH communication once the first
+   * 4DH message is successfully processed, moving the state from `R24` to `RL44`.
    */
   discardPeerRatchet2DH(): void {
     this._peerRatchet2DH = null;
   }
 
   /**
-   * Update 4DH versions
+   * Updates the protocol versions used for 4DH communication.
+   *
+   * @param versions - The negotiated local and remote protocol versions.
    */
   update4DHVersions(versions: IbexVersions): void {
     this._current4DHVersions = versions;
   }
 
   /**
-   * Serialize for storage
+   * Serializes the session state into a JSON-compatible object for persistent storage.
+   *
+   * @returns A serialized representation of the session, including active ratchets.
    */
   serialize(): SerializedIbexSession {
     return {
@@ -439,7 +548,13 @@ export class IbexSession {
   }
 
   /**
-   * Restore from serialized data
+   * Restores an `IbexSession` from a serialized session state object retrieved from storage.
+   *
+   * Reconstructs the state machines for all active KDF ratchets and ensures internal state consistency.
+   *
+   * @param data - The serialized session data.
+   * @param config - Optional configuration parameter overrides.
+   * @returns The restored `IbexSession` instance.
    */
   static restore(
     data: SerializedIbexSession,
