@@ -337,7 +337,8 @@ export class IbexProcessor {
         IbexSession.getSupportedVersionRange(),
         session.myEphemeralPublicKey
       );
-    } catch {
+    } catch (e: any) {
+      console.error('[Ibex] createAsResponder failed:', e);
       // Typically happens if version negotiation fails
       return createTerminate(init.sessionId, TerminateCause.DISABLED_BY_LOCAL);
     }
