@@ -648,7 +648,9 @@ export class IbexSession {
     // Derive K0 using BLAKE2b-256
     const k0 = await crypto.blake2b256(combined, config.kdfPersonal, salt, new Uint8Array(0));
 
-    return new KDFRatchet(0, k0, config);
+    // Official clients seed ratchets at counter 1 (the first message is sent
+    // with counter 1 under K0); seeding at 0 shifts every key by one turn.
+    return new KDFRatchet(1, k0, config);
   }
 
   /**
@@ -694,9 +696,10 @@ export class IbexSession {
     const myK = await crypto.blake2b256(intermediateHash, config.kdfPersonal, mySalt, new Uint8Array(0));
     const peerK = await crypto.blake2b256(intermediateHash, config.kdfPersonal, peerSalt, new Uint8Array(0));
 
+    // Counter 1 to match official clients, see initKDF2DH.
     return {
-      myRatchet4DH: new KDFRatchet(0, myK, config),
-      peerRatchet4DH: new KDFRatchet(0, peerK, config),
+      myRatchet4DH: new KDFRatchet(1, myK, config),
+      peerRatchet4DH: new KDFRatchet(1, peerK, config),
     };
   }
 

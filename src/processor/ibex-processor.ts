@@ -495,7 +495,9 @@ export class IbexProcessor {
     }
 
     // Special event for the transition to 4DH communication
-    if (message.dhType === DHType.FOURDH && ratchet.counter === 0) {
+    // Ratchets are seeded at counter 1, so the first 4DH message leaves the
+    // ratchet at 1 after turnUntil.
+    if (message.dhType === DHType.FOURDH && ratchet.counter === 1) {
       this.events.onFirst4DHMessageReceived?.(session, contact);
     }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DefaultCryptoProvider } from './default-provider.js';
 import { CryptoConstants } from '../types/crypto.js';
-import { constantTimeEqual } from '../utils/bytes.js';
+import { constantTimeEqual, bytesToHex, hexToBytes } from '../utils/bytes.js';
 
 describe('DefaultCryptoProvider', () => {
   const crypto = new DefaultCryptoProvider();
@@ -241,6 +241,31 @@ describe('DefaultCryptoProvider', () => {
       const bytes2 = await crypto.randomBytes(32);
 
       expect(constantTimeEqual(bytes1, bytes2)).toBe(false);
+    });
+  });
+
+  // Vectors computed independently with libsodium (PyNaCl crypto_box_beforenm)
+  // and Python hashlib.blake2b. They pin the Threema-compatible
+  // X25519HSalsa20 shared-secret derivation: raw X25519 scalar multiplication
+  // produces a different value and breaks interop with official clients.
+  describe('libsodium compatibility', () => {
+    const SK_A = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
+    const PK_B = hexToBytes('5714769d116bf76436ae74bc793d2c30ad1903c59ac5273805c7e2698b410c36');
+    const EXPECTED_BEFORENM = '72da8bbbf5a0760cea2a1d1f2c5f19d54f292f8e7a1dd292b7a86a567ceabc69';
+    const EXPECTED_2DH_K0 = '0f605e778a8ab34a90e3694d95123f77dec45f21040597c376b2206769067e38';
+
+    it('x25519 should match crypto_box_beforenm (X25519 + HSalsa20)', async () => {
+      const shared = await crypto.x25519(SK_A, PK_B);
+      expect(bytesToHex(shared)).toBe(EXPECTED_BEFORENM);
+    });
+
+    it('2DH root key derivation should match the reference KDF', async () => {
+      const shared = await crypto.x25519(SK_A, PK_B);
+      const combined = new Uint8Array(64);
+      combined.set(shared, 0);
+      combined.set(shared, 32);
+      const k0 = await crypto.blake2b256(combined, '3ma-e2e', 'ke-2dh-AAAAAAAA', new Uint8Array(0));
+      expect(bytesToHex(k0)).toBe(EXPECTED_2DH_K0);
     });
   });
 });

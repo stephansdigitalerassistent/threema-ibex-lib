@@ -83,9 +83,12 @@ export class DefaultCryptoProvider implements CryptoProvider {
    * ```
    */
   async x25519(privateKey: Uint8Array, publicKey: Uint8Array): Promise<Uint8Array> {
-    // tweetnacl's scalarMult performs X25519
-    // Wrap inputs in canonical Uint8Array for bundler compatibility
-    return nacl.scalarMult(new Uint8Array(privateKey), new Uint8Array(publicKey));
+    // Threema shared secrets are X25519HSalsa20 (NaCl box precomputation,
+    // crypto_box_beforenm), NOT raw X25519: the scalar-mult output is passed
+    // through HSalsa20 to obtain a uniformly distributed key. nacl.box.before
+    // implements exactly that. Raw scalarMult here breaks interop with every
+    // official Threema client.
+    return nacl.box.before(new Uint8Array(publicKey), new Uint8Array(privateKey));
   }
 
   /**
