@@ -437,6 +437,7 @@ export class IbexProcessor {
       : session.peerRatchet4DH;
 
     if (!ratchet) {
+      console.error('[Ibex] STATE_MISMATCH: no ratchet found for dhType:', message.dhType);
       return createReject(
         message.sessionId,
         new Uint8Array(16),
@@ -451,7 +452,8 @@ export class IbexProcessor {
       if (numSkipped > 0) {
         this.events.onMessagesSkipped?.(message.sessionId, contact, numSkipped);
       }
-    } catch {
+    } catch (e: any) {
+      console.error('[Ibex] STATE_MISMATCH: turnUntil failed:', e.message || e);
       // Likely counter moved backwards or increment too large
       return createReject(
         message.sessionId,
@@ -468,7 +470,8 @@ export class IbexProcessor {
     let plaintext: Uint8Array;
     try {
       plaintext = await this.crypto.symmetricDecrypt(message.encryptedData, encryptionKey, nonce);
-    } catch {
+    } catch (e: any) {
+      console.error('[Ibex] STATE_MISMATCH: symmetricDecrypt failed:', e.message || e);
       // Decryption failed - could be wrong key or corrupted data
       return createReject(
         message.sessionId,
