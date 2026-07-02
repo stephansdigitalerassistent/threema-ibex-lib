@@ -96,18 +96,22 @@ describe('IbexProcessor', () => {
       expect((response as IbexAccept).sessionId.equals(init.sessionId)).toBe(true);
     });
 
-    it('should return Terminate for duplicate Init', async () => {
+    it('should re-send the same Accept for duplicate Init', async () => {
       // Alice sends Init
       const result = await aliceProcessor.encapsulate(bobContact, alice, new Uint8Array([1]));
       const init = result.messages[0] as IbexInit;
 
       // Bob processes Init first time
-      await bobProcessor.processInit(aliceContact, bob, init);
+      const first = await bobProcessor.processInit(aliceContact, bob, init);
 
-      // Bob processes same Init again
+      // Bob processes same Init again (e.g. Alice missed the Accept)
       const response = await bobProcessor.processInit(aliceContact, bob, init);
 
-      expect(response.type).toBe(IbexMessageType.TERMINATE);
+      expect(response.type).toBe(IbexMessageType.ACCEPT);
+      expect((response as IbexAccept).sessionId.equals(init.sessionId)).toBe(true);
+      expect((response as IbexAccept).ephemeralPublicKey).toEqual(
+        (first as IbexAccept).ephemeralPublicKey
+      );
     });
   });
 

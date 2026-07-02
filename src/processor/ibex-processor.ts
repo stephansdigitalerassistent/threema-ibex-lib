@@ -299,8 +299,14 @@ export class IbexProcessor {
       init.sessionId
     );
     if (existing) {
-      // Re-sending Init is allowed, but we don't need to re-process it if already established
-      return createTerminate(init.sessionId, TerminateCause.UNKNOWN_SESSION);
+      // Re-sending Init is allowed (e.g. the peer missed our Accept); the
+      // handshake must be idempotent, so re-send the Accept instead of
+      // terminating the session the peer is about to use.
+      return createAccept(
+        init.sessionId,
+        IbexSession.getSupportedVersionRange(),
+        existing.myEphemeralPublicKey
+      );
     }
 
     // Delete any existing sessions that have 4DH established to avoid ambiguity,
@@ -438,6 +444,9 @@ export class IbexProcessor {
 
     if (!ratchet) {
       console.error('[Ibex] STATE_MISMATCH: no ratchet found for dhType:', message.dhType);
+      // Spec: on STATE_MISMATCH the session must be deleted so the peer's
+      // follow-up Init can negotiate a fresh one.
+      await this.store.delete(identityStore.identity, contact.identity, message.sessionId);
       return createReject(
         message.sessionId,
         new Uint8Array(16),
@@ -454,7 +463,9 @@ export class IbexProcessor {
       }
     } catch (e: any) {
       console.error('[Ibex] STATE_MISMATCH: turnUntil failed:', e.message || e);
-      // Likely counter moved backwards or increment too large
+      // Likely counter moved backwards or increment too large.
+      // Spec: delete the session so it can be renegotiated.
+      await this.store.delete(identityStore.identity, contact.identity, message.sessionId);
       return createReject(
         message.sessionId,
         new Uint8Array(16),
@@ -472,7 +483,9 @@ export class IbexProcessor {
       plaintext = await this.crypto.symmetricDecrypt(message.encryptedData, encryptionKey, nonce);
     } catch (e: any) {
       console.error('[Ibex] STATE_MISMATCH: symmetricDecrypt failed:', e.message || e);
-      // Decryption failed - could be wrong key or corrupted data
+      // Decryption failed - could be wrong key or corrupted data.
+      // Spec: delete the session so it can be renegotiated.
+      await this.store.delete(identityStore.identity, contact.identity, message.sessionId);
       return createReject(
         message.sessionId,
         new Uint8Array(16),
